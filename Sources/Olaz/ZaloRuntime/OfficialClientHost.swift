@@ -309,7 +309,7 @@ final class AsarSchemeHandler: NSObject, WKURLSchemeHandler {
         }
         stagedLock.unlock()
         let jsonData = (try? JSONSerialization.data(withJSONObject: items)) ?? Data("[]".utf8)
-        return (tokens, String(decoding: jsonData, as: .utf8))
+        return (tokens, String(decoding: jsonData, as: UTF8.self))
     }
 
     @MainActor

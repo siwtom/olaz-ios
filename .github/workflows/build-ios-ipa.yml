@@ -35,6 +35,7 @@ jobs:
         with:
           path: build/downloads
           key: ${{ runner.os }}-zalo-runtime-26.10.20
+          save-always: true
 
       - name: Run build helper self-tests
         run: |

@@ -148,8 +148,9 @@ struct MobileComposerBar: View {
                 }
                 .padding(.bottom, 5)
 
+                let isSendingMedia = sendingMedia
                 PhotosPicker(selection: $pickedPhotos, maxSelectionCount: 9, matching: .any(of: [.images, .videos])) {
-                    if sendingMedia {
+                    if isSendingMedia {
                         ProgressView()
                             .frame(width: 26, height: 26)
                     } else {

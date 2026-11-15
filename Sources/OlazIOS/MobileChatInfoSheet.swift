@@ -245,17 +245,10 @@ struct MobileChatInfoSheet: View {
         case .file(let name, let size, let url):
             Button {
                 Task {
-                    let resolved = await engine.resolveMedia(conversationId: conversationId, messageId: msg.id, kind: .file)
-                    switch resolved {
-                    case .file(let localURL):
+                    guard let url else { return }
+                    if let localURL = try? await MediaLoader.shared.localFile(for: url) {
                         NotificationCenter.default.post(name: .olazShareFileRequested, object: localURL)
-                    case .remote(let remoteURL):
-                        if let cached = try? await MediaLoader.shared.localFile(for: remoteURL) {
-                            NotificationCenter.default.post(name: .olazShareFileRequested, object: cached)
-                        } else {
-                            WebLink.open(remoteURL)
-                        }
-                    default:
+                    } else {
                         WebLink.open(url)
                     }
                 }

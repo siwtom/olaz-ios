@@ -148,7 +148,11 @@ final class ZaloEngine {
     @ObservationIgnored private var runtimeInstall: Task<Void, Never>?
 
     var isDebugRendererVisible = false {
-        didSet { if isDebugRendererVisible { host?.showDebugWindow() } }
+        didSet {
+            #if os(macOS)
+            if isDebugRendererVisible { host?.showDebugWindow() }
+            #endif
+        }
     }
 
     // MARK: Lifecycle

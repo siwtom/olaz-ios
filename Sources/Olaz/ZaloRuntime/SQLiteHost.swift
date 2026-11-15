@@ -472,7 +472,7 @@ extension SQLiteHost {
             if let name = args.string(0) { migrated(name) }
             return nil
         }
-        bridge.async("$znode.sqliteHost.exec") { [self] args in
+        bridge.async("$znode.sqliteHost.exec") { [self] args -> Any? in
             guard let name = args.string(0), let method = args.string(1) else { throw ZaloBridge.BridgeError(message: "exec: bad arguments") }
             let statement = args.dict(2) ?? [:]
             switch method {

@@ -56,6 +56,7 @@ struct OlazIOSApp: App {
 
 /// Branches on device idiom rather than `horizontalSizeClass`, since iPhone XS Max (414×896)
 /// reports `.regular` width in landscape.
+@MainActor
 enum IOSDeviceLayout {
     static var isPhone: Bool {
         UIDevice.current.userInterfaceIdiom == .phone

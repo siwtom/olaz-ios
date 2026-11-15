@@ -25,6 +25,32 @@ struct MobileChatView: View {
     }
 
     var body: some View {
+        scrollContent
+            .sheet(isPresented: $showChatInfo) {
+                MobileChatInfoSheet(
+                    engine: engine,
+                    conversationId: conversationId,
+                    groupComposeRequest: $groupComposeRequest,
+                    onJumpToMessage: { msgId in
+                        showChatInfo = false
+                        pendingScrollMessageId = msgId
+                    }
+                )
+            }
+            .fullScreenCover(item: $photoViewerItem) { item in
+                MobilePhotoViewerSheet(item: item)
+            }
+            .fullScreenCover(item: $videoViewerItem) { item in
+                MobileVideoPlayerSheet(item: item)
+            }
+            .sheet(item: $reactionDetailRequest) { req in
+                MobileReactionDetailSheet(engine: engine, conversationId: req.conversationId, messageId: req.messageId)
+            }
+            .modifier(MobileChatCardSheetsModifier(engine: engine))
+            .modifier(MobileChatConfirmsModifier(engine: engine))
+    }
+
+    private var scrollContent: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
@@ -121,107 +147,12 @@ struct MobileChatView: View {
         }
         .task(id: conversationId) {
             engine.openConversation(conversationId)
-            if messages.contains(where: { _ in false }) { }
         }
         .onDisappear {
             if engine.openConversationId == conversationId {
                 engine.closeConversation()
                 CardActionCenter.shared.reset()
             }
-        }
-        .sheet(isPresented: $showChatInfo) {
-            MobileChatInfoSheet(
-                engine: engine,
-                conversationId: conversationId,
-                groupComposeRequest: $groupComposeRequest,
-                onJumpToMessage: { msgId in
-                    showChatInfo = false
-                    pendingScrollMessageId = msgId
-                }
-            )
-        }
-        .fullScreenCover(item: $photoViewerItem) { item in
-            MobilePhotoViewerSheet(item: item)
-        }
-        .fullScreenCover(item: $videoViewerItem) { item in
-            MobileVideoPlayerSheet(item: item)
-        }
-        .sheet(item: $reactionDetailRequest) { req in
-            MobileReactionDetailSheet(engine: engine, conversationId: req.conversationId, messageId: req.messageId)
-        }
-        .sheet(item: Binding(
-            get: { engine.forwardRequest },
-            set: { if $0 == nil { engine.forwardRequest = nil } }
-        )) { req in
-            MobileForwardSheet(engine: engine, request: req)
-        }
-        .sheet(item: Binding(
-            get: { CardActionCenter.shared.profile },
-            set: { CardActionCenter.shared.profile = $0 }
-        )) { req in
-            MobileProfileSheet(engine: engine, request: req)
-        }
-        .sheet(item: Binding(
-            get: { CardActionCenter.shared.alias },
-            set: { CardActionCenter.shared.alias = $0 }
-        )) { req in
-            MobileAliasSheet(engine: engine, request: req)
-        }
-        .sheet(item: Binding(
-            get: { CardActionCenter.shared.groupInvite },
-            set: { CardActionCenter.shared.groupInvite = $0 }
-        )) { req in
-            MobileGroupInviteSheet(engine: engine, request: req)
-        }
-        .sheet(item: Binding(
-            get: { CardActionCenter.shared.stickers },
-            set: { CardActionCenter.shared.stickers = $0 }
-        )) { req in
-            MobileStickerCategorySheet(engine: engine, request: req)
-        }
-        .sheet(item: Binding(
-            get: { CardActionCenter.shared.reminder },
-            set: { CardActionCenter.shared.reminder = $0 }
-        )) { req in
-            MobileReminderDetailSheet(engine: engine, request: req)
-        }
-        .sheet(item: Binding(
-            get: { CardActionCenter.shared.poll },
-            set: { CardActionCenter.shared.poll = $0 }
-        )) { req in
-            MobilePollDetailSheet(engine: engine, request: req)
-        }
-        .alert(
-            engine.messageConfirm?.title ?? "",
-            isPresented: Binding(
-                get: { engine.messageConfirm != nil },
-                set: { if !$0, let c = engine.messageConfirm { engine.answerMessageConfirm(c, ok: false) } }
-            )
-        ) {
-            if let c = engine.messageConfirm {
-                Button(c.ok, role: c.destructive ? .destructive : nil) {
-                    engine.answerMessageConfirm(c, ok: true)
-                }
-                Button(c.cancel, role: .cancel) {
-                    engine.answerMessageConfirm(c, ok: false)
-                }
-            }
-        } message: {
-            Text(engine.messageConfirm?.message ?? "")
-        }
-        .alert(
-            engine.composerConfirm?.title ?? "",
-            isPresented: Binding(
-                get: { engine.composerConfirm != nil },
-                set: { if !$0, let c = engine.composerConfirm { engine.answerComposerConfirm(c, ok: false) } }
-            )
-        ) {
-            if let c = engine.composerConfirm {
-                Button(c.ok) { engine.answerComposerConfirm(c, ok: true) }
-                Button(c.cancel, role: .cancel) { engine.answerComposerConfirm(c, ok: false) }
-            }
-        } message: {
-            Text(engine.composerConfirm?.message ?? "")
         }
     }
 
@@ -322,4 +253,104 @@ struct ReactionDetailRequest: Identifiable {
     let conversationId: String
     let messageId: String
     var id: String { "\(conversationId)|\(messageId)" }
+}
+
+private struct MobileChatCardSheetsModifier: ViewModifier {
+    @Bindable var engine: ZaloEngine
+
+    func body(content: Content) -> some View {
+        secondarySheets(primarySheets(content))
+    }
+
+    @ViewBuilder
+    private func primarySheets(_ content: Content) -> some View {
+        content
+            .sheet(item: Binding(
+                get: { engine.forwardRequest },
+                set: { if $0 == nil { engine.forwardRequest = nil } }
+            )) { req in
+                MobileForwardSheet(engine: engine, request: req)
+            }
+            .sheet(item: Binding(
+                get: { CardActionCenter.shared.profile },
+                set: { CardActionCenter.shared.profile = $0 }
+            )) { req in
+                MobileProfileSheet(engine: engine, request: req)
+            }
+            .sheet(item: Binding(
+                get: { CardActionCenter.shared.alias },
+                set: { CardActionCenter.shared.alias = $0 }
+            )) { req in
+                MobileAliasSheet(engine: engine, request: req)
+            }
+    }
+
+    @ViewBuilder
+    private func secondarySheets<V: View>(_ content: V) -> some View {
+        content
+            .sheet(item: Binding(
+                get: { CardActionCenter.shared.groupInvite },
+                set: { CardActionCenter.shared.groupInvite = $0 }
+            )) { req in
+                MobileGroupInviteSheet(engine: engine, request: req)
+            }
+            .sheet(item: Binding(
+                get: { CardActionCenter.shared.stickers },
+                set: { CardActionCenter.shared.stickers = $0 }
+            )) { req in
+                MobileStickerCategorySheet(engine: engine, request: req)
+            }
+            .sheet(item: Binding(
+                get: { CardActionCenter.shared.reminder },
+                set: { CardActionCenter.shared.reminder = $0 }
+            )) { req in
+                MobileReminderDetailSheet(engine: engine, request: req)
+            }
+            .sheet(item: Binding(
+                get: { CardActionCenter.shared.poll },
+                set: { CardActionCenter.shared.poll = $0 }
+            )) { req in
+                MobilePollDetailSheet(engine: engine, request: req)
+            }
+    }
+}
+
+private struct MobileChatConfirmsModifier: ViewModifier {
+    @Bindable var engine: ZaloEngine
+
+    func body(content: Content) -> some View {
+        content
+            .alert(
+                engine.messageConfirm?.title ?? "",
+                isPresented: Binding(
+                    get: { engine.messageConfirm != nil },
+                    set: { if !$0, let c = engine.messageConfirm { engine.answerMessageConfirm(c, ok: false) } }
+                )
+            ) {
+                if let c = engine.messageConfirm {
+                    Button(c.ok, role: c.destructive ? .destructive : nil) {
+                        engine.answerMessageConfirm(c, ok: true)
+                    }
+                    Button(c.cancel, role: .cancel) {
+                        engine.answerMessageConfirm(c, ok: false)
+                    }
+                }
+            } message: {
+                Text(engine.messageConfirm?.message ?? "")
+            }
+            .alert(
+                engine.composerConfirm?.title ?? "",
+                isPresented: Binding(
+                    get: { engine.composerConfirm != nil },
+                    set: { if !$0, let c = engine.composerConfirm { engine.answerComposerConfirm(c, ok: false) } }
+                )
+            ) {
+                if let c = engine.composerConfirm {
+                    Button(c.ok) { engine.answerComposerConfirm(c, ok: true) }
+                    Button(c.cancel, role: .cancel) { engine.answerComposerConfirm(c, ok: false) }
+                }
+            } message: {
+                Text(engine.composerConfirm?.message ?? "")
+            }
+    }
 }

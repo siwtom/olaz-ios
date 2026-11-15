@@ -361,6 +361,7 @@ final class CallBridge {
 
     /// Directories of Olaz processes that no longer exist (crash / force quit).
     static func removeStaleDirectories(in base: URL) {
+        #if os(macOS)
         let fm = FileManager.default
         for url in (try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: nil)) ?? [] {
             guard let pid = CallOrphans.ownerPID(ofDirectoryNamed: url.lastPathComponent),
@@ -370,6 +371,7 @@ final class CallBridge {
             guard lstat(url.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR, info.st_uid == getuid() else { continue }
             try? fm.removeItem(at: url)
         }
+        #endif
     }
 
     // MARK: main → helper

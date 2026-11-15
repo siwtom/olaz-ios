@@ -554,21 +554,16 @@ struct MobileMessageBubble: View {
     }
 
     private func openFile(url: URL?) {
+        guard let url else {
+            CardActionCenter.shared.show("Tệp không còn đường dẫn tải.", in: message.conversationId)
+            return
+        }
         Task {
-            let resolved = await engine.resolveMedia(conversationId: message.conversationId, messageId: message.id, kind: .file)
-            switch resolved {
-            case .file(let localURL):
+            do {
+                let localURL = try await MediaLoader.shared.localFile(for: url)
                 NotificationCenter.default.post(name: .olazShareFileRequested, object: localURL)
-            case .remote(let remoteURL):
-                if let cached = try? await MediaLoader.shared.localFile(for: remoteURL) {
-                    NotificationCenter.default.post(name: .olazShareFileRequested, object: cached)
-                } else {
-                    WebLink.open(remoteURL)
-                }
-            case .failed(let msg):
-                CardActionCenter.shared.show(msg, in: message.conversationId)
-            case .unsupported:
-                if let url { WebLink.open(url) }
+            } catch {
+                WebLink.open(url)
             }
         }
     }

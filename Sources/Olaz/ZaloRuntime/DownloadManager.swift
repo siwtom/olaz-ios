@@ -638,6 +638,8 @@ struct GHASH {
     }
 
     func digest() -> [UInt8] {
-        (0..<8).map { UInt8(truncatingIfNeeded: yh >> UInt64(56 - 8 * $0)) } + (0..<8).map { UInt8(truncatingIfNeeded: yl >> UInt64(56 - 8 * $0)) }
+        let hi: [UInt8] = (0..<8).map { i in UInt8(truncatingIfNeeded: yh >> UInt64(56 - 8 * i)) }
+        let lo: [UInt8] = (0..<8).map { i in UInt8(truncatingIfNeeded: yl >> UInt64(56 - 8 * i)) }
+        return hi + lo
     }
 }

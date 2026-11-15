@@ -233,14 +233,9 @@ struct MobilePhotoViewerSheet: View {
                     self.image = img
                     return
                 }
-            case .remote(let remoteURL):
-                if let loaded = await MediaLoader.shared.image(for: remoteURL, maxPixelSize: 2400, cache: false) {
-                    self.image = loaded.image
-                    return
-                }
-            case .failed(let msg):
-                self.errorText = msg
-            case .unsupported:
+            case .expired:
+                self.errorText = "Ảnh này đã quá hạn lưu trữ trên Zalo."
+            case .unavailable, .unsupported:
                 break
             }
         }
@@ -381,15 +376,9 @@ struct MobileVideoPlayerSheet: View {
                 fileURL = url
                 startPlayback(url)
                 return
-            case .remote(let url):
-                if let local = try? await MediaLoader.shared.localFile(for: url) {
-                    fileURL = local
-                    startPlayback(local)
-                    return
-                }
-            case .failed(let msg):
-                errorText = msg
-            case .unsupported:
+            case .expired:
+                errorText = "Video này đã quá hạn lưu trữ trên Zalo."
+            case .unavailable, .unsupported:
                 break
             }
         }
@@ -474,7 +463,7 @@ struct MobileVoiceBubblePlayer: View {
         if let player {
             try? AVAudioSession.sharedInstance().setCategory(.playback)
             try? AVAudioSession.sharedInstance().setActive(true)
-            player.seek(to: .zero)
+            _ = await player.seek(to: .zero)
             player.play()
             isPlaying = true
             return
@@ -484,23 +473,8 @@ struct MobileVoiceBubblePlayer: View {
         errorText = nil
         defer { isLoading = false }
 
-        var resolvedURL: URL?
-        let media = await engine.resolveMedia(conversationId: conversationId, messageId: messageId, kind: .voice)
-        switch media {
-        case .file(let f):
-            resolvedURL = f
-        case .remote(let r):
-            resolvedURL = try? await MediaLoader.shared.localFile(for: r)
-        case .failed(let msg):
-            errorText = msg
-        case .unsupported:
-            break
-        }
-        if resolvedURL == nil, let url {
-            resolvedURL = try? await MediaLoader.shared.localFile(for: url)
-        }
-        guard let playURL = resolvedURL else {
-            if errorText == nil { errorText = "Không tải được tin nhắn thoại" }
+        guard let url, let playURL = try? await MediaLoader.shared.localFile(for: url) else {
+            errorText = "Không tải được tin nhắn thoại"
             return
         }
 
