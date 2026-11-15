@@ -827,7 +827,7 @@ struct MobileCreateGroupSheet: View {
         NavigationStack {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    let avatarPreview = groupAvatar.map { SendableImage(image: $0.image) }
+                    let avatarPreview = groupAvatar?.image.map { SendableImage(image: $0) }
                     PhotosPicker(selection: $avatarPhotoItem, matching: .images) {
                         if let avatarPreview {
                             Image(platformImage: avatarPreview.image)
