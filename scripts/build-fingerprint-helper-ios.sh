@@ -16,7 +16,7 @@ export CGO_ENABLED=1
 export GOOS=ios
 export GOARCH=arm64
 export CC="$CLANG_BIN"
-export CGO_CFLAGS="-isysroot $SDK_PATH -arch arm64 -miphoneos-version-min=17.0 -fembed-bitcode=no"
+export CGO_CFLAGS="-isysroot $SDK_PATH -arch arm64 -miphoneos-version-min=17.0"
 export CGO_LDFLAGS="-isysroot $SDK_PATH -arch arm64 -miphoneos-version-min=17.0"
 
 echo "==> Building FingerprintHelper C-archive (ios/arm64, min iOS 17.0)"
