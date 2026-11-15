@@ -1,3 +1,5 @@
+import Foundation
+#if os(macOS)
 import AppKit
 import CoreGraphics
 
@@ -291,3 +293,33 @@ final class ScreenCapture {
         }
     }
 }
+#else
+@MainActor
+final class ScreenCapture {
+    enum Outcome {
+        case send(URL, conversationId: String)
+        case sendToMe(URL, conversationId: String)
+        case share(URL, conversationId: String)
+        case shareText(String, conversationId: String)
+        case noPermission
+        case failed(String, conversationId: String)
+    }
+
+    var onOutcome: ((Outcome) -> Void)?
+    var log: (String) -> Void = { _ in }
+    var isCapturing: Bool { false }
+
+    nonisolated static func helperExecutable(appURL: URL = OfficialZaloInstall.defaultAppURL) -> URL {
+        appURL.appendingPathComponent("Contents/ZaloHelper.app/Contents/MacOS/ZaloCap")
+    }
+
+    init(executable: URL = ScreenCapture.helperExecutable(),
+         logDirectory: URL = ZaloPlatform.defaultUserData.deletingLastPathComponent().appendingPathComponent("logs/capture", isDirectory: true)) {}
+
+    func start(in conversationId: String, withOlaz: Bool) {
+        onOutcome?(.failed("Chụp màn hình desktop không khả dụng trên iOS.", conversationId: conversationId))
+    }
+
+    func shutdown() {}
+}
+#endif

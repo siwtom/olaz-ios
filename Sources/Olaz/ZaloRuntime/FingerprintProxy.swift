@@ -3,6 +3,14 @@ import os
 
 private let fpLog = Logger(subsystem: "app.olaz", category: "fingerprint")
 
+#if os(iOS)
+@_silgen_name("OlazFPStartLoopback")
+private func OlazFPStartLoopback() -> Int32
+
+@_silgen_name("OlazFPStop")
+private func OlazFPStop()
+#endif
+
 /// Performs Olaz's network requests through `olaz-fingerprint-helper`, so that the TLS and
 /// HTTP/2 fingerprints of every connection are Chromium 108's — the official Zalo PC client's
 /// (Electron 22.3.9) — instead of Apple's. See `FingerprintHelper/` and
@@ -68,7 +76,9 @@ final class FingerprintProxy {
     }
 
     private var state: State = .idle
+    #if os(macOS)
     private var process: Process?
+    #endif
     private var restartAttempts = 0
     /// Events for open websockets, by session id ("w<NetworkProxy id>").
     private var webSocketHandlers: [String: ((WSEvent) -> Void)] = [:]
@@ -83,6 +93,7 @@ final class FingerprintProxy {
         Task { _ = await connection() }
     }
 
+    #if os(macOS)
     private var helperURL: URL? {
         var candidates: [URL] = []
         if let executable = Bundle.main.executableURL {
@@ -94,6 +105,7 @@ final class FingerprintProxy {
             .deletingLastPathComponent().appendingPathComponent("FingerprintHelper/build/olaz-fingerprint-helper"))
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
+    #endif
 
     private func connection() async -> Connection? {
         switch state {
@@ -121,6 +133,7 @@ final class FingerprintProxy {
     }
 
     private func start() async -> Connection? {
+        #if os(macOS)
         guard let helper = helperURL else {
             fpLog.notice("fingerprint helper not bundled — requests use URLSession")
             return nil
@@ -193,10 +206,49 @@ final class FingerprintProxy {
         restartAttempts = 0
         fpLog.info("fingerprint helper ready (\(profile, privacy: .public))")
         return connection
+        #else
+        let port = Int(OlazFPStartLoopback())
+        guard port > 0 else {
+            fpLog.error("fingerprint helper loopback start failed")
+            return nil
+        }
+        guard let connection = Connection(loopbackPort: port) else {
+            fpLog.error("fingerprint helper loopback connect failed (port \(port))")
+            OlazFPStop()
+            return nil
+        }
+        connection.onFrame = { [weak self] frame in
+            guard let self else { return }
+            switch frame {
+            case .closed:
+                self.helperDied(stderrTail: [])
+            case .wsEvent(let session, let event):
+                self.handleWebSocketEvent(session, event)
+            }
+        }
+        connection.startReading()
+        let profile: String
+        do {
+            profile = try await withTimeout(seconds: 5) { try await connection.expectHello() }
+        } catch {
+            fpLog.error("fingerprint helper loopback handshake failed: \(error.localizedDescription, privacy: .public)")
+            connection.close()
+            OlazFPStop()
+            return nil
+        }
+        restartAttempts = 0
+        fpLog.info("fingerprint helper ready over loopback (\(profile, privacy: .public))")
+        return connection
+        #endif
     }
 
     private func helperDied(stderrTail: [String]) {
+        #if os(macOS)
         let status = process?.terminationStatus.description ?? "?"
+        process = nil
+        #else
+        let status = "loopback-closed"
+        #endif
         fpLog.error("fingerprint helper exited (status \(status, privacy: .public)) \(stderrTail.joined(separator: " | "), privacy: .public)")
         if case .ready(let connection) = state {
             state = .failed("helper exited", retryAt: Date().addingTimeInterval(retryDelay()))
@@ -205,9 +257,9 @@ final class FingerprintProxy {
             webSocketHandlers.removeAll()
             restartAttempts += 1
         }
-        process = nil
     }
 
+    #if os(macOS)
     private func sweepStaleSockets(in directory: URL) {
         let fm = FileManager.default
         let stale = (try? fm.contentsOfDirectory(atPath: directory.path)) ?? []
@@ -218,11 +270,21 @@ final class FingerprintProxy {
             }
         }
     }
+    #endif
 
     /// Ready right now (does not start anything).
     var isReady: Bool {
         if case .ready = state { return true }
         return false
+    }
+
+    var statusLabel: String {
+        switch state {
+        case .ready: "Chrome 108 TLS (Active)"
+        case .starting: "Đang khởi động TLS helper..."
+        case .idle: "URLSession Fallback (Idle)"
+        case .failed(let reason, _): "URLSession Fallback (\(reason))"
+        }
     }
 
     /// Waits for readiness (starting the helper if needed) for at most `seconds`.
@@ -312,11 +374,16 @@ final class FingerprintProxy {
     // MARK: Shutdown
 
     func shutdown() {
-        guard case .ready(let connection) = state else { return }
-        connection.shutdown()
+        if case .ready(let connection) = state {
+            connection.shutdown()
+        }
         state = .failed("shut down", retryAt: .distantFuture)
+        #if os(macOS)
         process?.terminate()
         process = nil
+        #else
+        OlazFPStop()
+        #endif
     }
 
     // MARK: Timeout helper

@@ -238,9 +238,25 @@
     return true;
   };
 
-  // ---- the files Swift picked: a hidden file input whose open panel Swift answers ----
+  // ---- the files Swift picked: staged fetch (iOS) or hidden file input (macOS) ----
   // Must run synchronously inside the call Swift makes (its user gesture); resolves [] when nothing came back.
   const pickFiles = () => {
+    if (Array.isArray(window.__zaloStagedFiles) && window.__zaloStagedFiles.length) {
+      const items = window.__zaloStagedFiles;
+      window.__zaloStagedFiles = null;
+      return (async () => {
+        const files = [];
+        for (const item of items) {
+          try {
+            const res = await fetch(item.url);
+            if (!res.ok) continue;
+            const blob = await res.blob();
+            files.push(new File([blob], item.name || 'file', { type: item.mime || blob.type || 'application/octet-stream' }));
+          } catch (e) { diag('pick staged ' + scrubErr(e)); }
+        }
+        return files;
+      })();
+    }
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;

@@ -1,4 +1,9 @@
+import Foundation
+#if os(macOS)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 
 /// Assembles the bridge the official renderer sees:
 /// - table-driven members → IPC channels answered by `ZaloMainProcess`;
@@ -56,20 +61,20 @@ enum BridgeImplementation {
             "totalmem": process.physicalMemory,
             "cpus": process.activeProcessorCount,
             "uptime": Int(process.systemUptime),
-            "username": NSUserName(),
+            "username": PlatformApp.systemUsername,
             "networkInterfaces": Self.networkInterfacesJSON(),
         ] as [String: Any])
         bridge.value("$znode.fs.constants", ["F_OK": 0, "R_OK": 4, "W_OK": 2, "X_OK": 1])
         bridge.value("$znode.fs.constanst", ["F_OK": 0, "R_OK": 4, "W_OK": 2, "X_OK": 1])
 
         // $zelectronNative clipboard (Electron `clipboard`)
-        bridge.sync("$zelectronNative.clipboardText") { _ in NSPasteboard.general.string(forType: .string) ?? "" }
+        bridge.sync("$zelectronNative.clipboardText") { _ in PlatformPasteboard.string() ?? "" }
         bridge.sync("$zelectronNative.clipboardWriteText") { args in
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(args.string(0) ?? "", forType: .string)
+            PlatformPasteboard.setString(args.string(0) ?? "")
             return nil
         }
         bridge.sync("$zelectronNative.clipboardFormats") { _ in
+            #if os(macOS)
             (NSPasteboard.general.types ?? []).map { type -> String in
                 switch type {
                 case .string: "text/plain"
@@ -80,6 +85,9 @@ enum BridgeImplementation {
                 default: type.rawValue
                 }
             }
+            #else
+            UIPasteboard.general.hasStrings ? ["text/plain"] : (UIPasteboard.general.hasImages ? ["image/png"] : [])
+            #endif
         }
 
         FileSystemBridge.install(on: bridge, platform: platform)

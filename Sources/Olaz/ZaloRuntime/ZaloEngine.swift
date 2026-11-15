@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 import Observation
 import os
 
@@ -156,22 +156,63 @@ final class ZaloEngine {
     func start() {
         guard host == nil, runtimeInstall == nil else { return }
         ZaloRuntime.prepareForLaunch()
-        guard ZaloRuntime.isComplete(ZaloRuntime.current), let install = try? OfficialZaloInstall.locate() else {
+        let appURL = OfficialZaloInstall.defaultAppURL
+        guard ZaloRuntime.isComplete(appURL), let install = try? OfficialZaloInstall.locate(appURL: appURL) else {
+            #if os(macOS)
             installRuntime()
+            #else
+            phase = .preparing(RuntimeSetup(
+                step: .looking,
+                failure: "Thiếu dữ liệu ZaloRuntime/Contents/Resources/app.asar trong gói cài đặt iOS."
+            ))
+            #endif
             return
         }
         boot(install)
+        #if os(macOS)
         upgradeRuntimeIfOutdated(installed: install.version)
+        #endif
     }
 
+    #if os(macOS)
     /// After a failed runtime install.
     func retryRuntimeSetup() {
         guard case .preparing(let setup) = phase, setup.failure != nil else { return }
         installRuntime()
     }
+    #else
+    func retryRuntimeSetup() {
+        start()
+    }
+    #endif
+
+    /// Synchronizes WebView visibility / focus and notification status when returning from background (especially on iOS).
+    func handleSceneDidBecomeActive() {
+        NativeNotifier.shared.syncFocusState()
+        Task { await refreshNotificationAuthorization() }
+    }
+
+    var isBackgroundWorkerRunning: Bool {
+        mainProcess?.isSharedWorkerRunning ?? false
+    }
+
+    /// Starts the hidden shared-worker WebView on demand (on iOS, deferred until zCloud or Phone→PC transfer).
+    func ensureBackgroundWorker() {
+        mainProcess?.ensureSharedWorker()
+    }
+
+    func stopBackgroundWorker() {
+        mainProcess?.stopSharedWorker()
+    }
+
+    func purgeMediaMemory() {
+        MediaLoader.purgeMemoryCache()
+        URLCache.shared.removeAllCachedResponses()
+    }
 
     /// First launch: puts the official Zalo code into `ZaloRuntime.current`, then boots from it.
     private func installRuntime() {
+        #if os(macOS)
         phase = .preparing(RuntimeSetup())
         let installer = ZaloRuntimeInstaller { [weak self] step in
             // In order, and never over a later step or a failure.
@@ -204,10 +245,17 @@ final class ZaloEngine {
                 self.phase = .preparing(setup)
             }
         }
+        #else
+        phase = .preparing(RuntimeSetup(
+            step: .looking,
+            failure: "Thiếu dữ liệu ZaloRuntime/Contents/Resources/app.asar trong gói cài đặt iOS."
+        ))
+        #endif
     }
 
     /// A runtime older than the Zalo version this build pins is upgraded quietly; the new one is used from the next launch.
     private func upgradeRuntimeIfOutdated(installed: String) {
+        #if os(macOS)
         let pinned = ZaloRuntime.pinned.version
         guard ZaloRuntime.isNewer(pinned, than: installed) else { return }
         Task(priority: .utility) {
@@ -218,6 +266,7 @@ final class ZaloEngine {
                 EngineLog.shared.write("runtime: upgrade to Zalo \(pinned) failed — \(error.localizedDescription)")
             }
         }
+        #endif
     }
 
     private func boot(_ install: OfficialZaloInstall.Info) {

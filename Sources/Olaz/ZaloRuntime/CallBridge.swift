@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import os
 
@@ -116,15 +115,24 @@ final class CallBridge {
         self.socketBase = socketBase
         self.key = key
         self.spawn = spawn ?? { recv, send, onExit in
+            #if os(macOS)
             guard let executable else { throw UnixSocketServer.SocketError(message: "ZaloCall not found") }
             return try SystemCallProcess.launch(executable, arguments: [recv, send], log: log, onExit: onExit)
+            #else
+            throw UnixSocketServer.SocketError(message: "Gọi thoại/video chưa khả dụng trên iOS")
+            #endif
         }
         self.emit = emit
         self.log = log
+        #if os(macOS)
         self.verify = verify ?? { try CallHelperSignature.verify(executable: $0) }
         self.reapOrphans = reapOrphans ?? {
             if let executable { CallOrphans.reap(helperExecutable: executable) }
         }
+        #else
+        self.verify = verify ?? { _ in }
+        self.reapOrphans = reapOrphans ?? {}
+        #endif
     }
 
     /// pid of the running helper (for bringing its window forward).
@@ -493,6 +501,7 @@ final class CallBridge {
 
 // MARK: - Production process
 
+#if os(macOS)
 /// `child_process.spawn(ZaloCall, [recvPath, sendPath])`. stdout / stderr are drained and never logged
 /// verbatim; a sanitized last line of stderr is logged on an abnormal exit.
 @MainActor
@@ -554,3 +563,4 @@ final class SystemCallProcess: CallProcess {
     func terminate() { process.terminate() }
     func forceKill() { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
 }
+#endif

@@ -100,8 +100,13 @@ private extension Data {
 
 /// Locates the official client the runtime loads code from.
 enum OfficialZaloInstall {
-    /// The runtime Olaz installed (`ZaloRuntime.current`), laid out like Zalo.app's `Contents/`.
-    static var defaultAppURL: URL { ZaloRuntime.current }
+    /// The runtime Olaz uses (`ZaloRuntime.current`, or `ZaloRuntime.bundled` embedded in the app bundle on iOS),
+    /// laid out like Zalo.app's `Contents/`.
+    static var defaultAppURL: URL {
+        if ZaloRuntime.isComplete(ZaloRuntime.current) { return ZaloRuntime.current }
+        if let bundled = ZaloRuntime.bundled, ZaloRuntime.isComplete(bundled) { return bundled }
+        return ZaloRuntime.current
+    }
 
     struct Info {
         let appURL: URL

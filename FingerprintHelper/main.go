@@ -1,3 +1,5 @@
+//go:build !ios
+
 // olaz-fingerprint-helper performs Olaz's network requests with the official Zalo PC client's
 // TLS / HTTP-2 fingerprint (Chromium 108, Electron 22.3.9), so that VNG's servers cannot
 // distinguish Olaz's connections from the official client's by their shape.
@@ -19,11 +21,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-)
-
-const (
-	helperVersion = 1
-	profileName   = "chrome_108"
 )
 
 func main() {

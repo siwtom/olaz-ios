@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 
 // Card buttons (e-card actions, suggested stickers, contact card, info-message links, reminder cards), bridged to
@@ -27,8 +26,7 @@ extension ZaloEngine {
         case .openChat(let id): openContactConversation(id)
         case .openURL(let url): WebLink.open(url)
         case .copy(let text):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            PlatformPasteboard.setString(text)
         case .present(.tab(let target)): SectionRouter.open(target)
         case .failed, .locked, .unsupported, .pending: EngineLog.shared.write("card action \(ref.split(separator: ":").first.map(String.init) ?? "-") → \(outcome.logName)")
         default: break

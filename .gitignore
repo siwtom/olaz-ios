@@ -5,6 +5,8 @@
 .build/
 build/
 DerivedData/
+OlazIOS.xcodeproj/
+*.xcarchive
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 .swiftpm/
@@ -22,6 +24,8 @@ dist/
 *.dmg
 
 # Signing / notarization material — never commit
+certs/
+*secret*.txt
 *.p12
 *.cer
 *.certSigningRequest
@@ -34,6 +38,10 @@ AuthKey_*.p8
 # Patch leftovers
 *.orig
 *.rej
+
+# Python cache
+__pycache__/
+*.py[cod]
 
 # ── Third-party Zalo (VNG) content ──────────────────────────────────────────
 # Olaz downloads the official Zalo PC runtime from VNG at first launch; none of

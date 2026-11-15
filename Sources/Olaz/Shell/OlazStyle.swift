@@ -1,11 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// User-visible product name. The package, bundle id and log subsystem still say Olaz until the rename.
-enum AppBrand {
-    static let name = "Olaz"
-}
-
 /// `@AppStorage` keys of the Olaz appearance and first-run settings.
 enum OlazPrefs {
     /// `OlazAccent.rawValue`.

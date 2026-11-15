@@ -1,3 +1,4 @@
+#if os(macOS)
 import Darwin
 import Foundation
 import Security
@@ -125,3 +126,4 @@ enum CallOrphans {
         return args.count == Int(argc) ? args : nil
     }
 }
+#endif

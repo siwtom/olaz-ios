@@ -1,4 +1,7 @@
+import Foundation
+#if os(macOS)
 import AppKit
+#endif
 import CommonCrypto
 import CryptoKit
 import os
@@ -77,7 +80,7 @@ final class ZaloMainProcess {
         mainLog.notice("storage backend: \(self.storage.rawValue, privacy: .public)")
         // main `stop()`: the call helper and the fingerprint helper do not outlive the app.
         terminationObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            forName: PlatformApp.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.callBridge?.shutdown()
                 FingerprintProxy.shared.shutdown()
@@ -134,8 +137,18 @@ final class ZaloMainProcess {
     func start() {
         guard let host else { return }
         normalizeDatabaseAdapterState()
+        #if os(macOS)
         if hasSession { startSharedWorker() }
+        #endif
         host.load(hasSession ? .main : .login, query: pageQuery())
+    }
+
+    var isSharedWorkerRunning: Bool { workerHost != nil }
+
+    /// Starts the hidden shared-worker window only if not already running (lazy on-demand for iOS).
+    func ensureSharedWorker() {
+        guard workerHost == nil, hasSession else { return }
+        startSharedWorker()
     }
 
     /// Electron main creates the hidden shared-worker window together with the main window.
@@ -308,7 +321,11 @@ final class ZaloMainProcess {
             guard let self else { return nil }
             mainLog.notice("renderer requested restart for DB migration — reloading on \(self.storage.rawValue, privacy: .public)")
             self.normalizeDatabaseAdapterState()
+            #if os(macOS)
             if self.hasSession { self.startSharedWorker() } else { self.stopSharedWorker() }
+            #else
+            if !self.hasSession { self.stopSharedWorker() }
+            #endif
             self.host?.load(self.hasSession ? .main : .login, query: self.pageQuery())
             return nil
         }
@@ -442,7 +459,7 @@ final class ZaloMainProcess {
 
         bridge.handle("badge-count") { [weak self] args in
             let count = args.int(0) ?? 0
-            NSApp.dockTile.badgeLabel = count <= 0 ? nil : (count > 5 ? "5+" : "\(count)")
+            PlatformApp.setBadgeCount(count)
             self?.onEvent?(.badge(count))
             return nil
         }
@@ -450,11 +467,14 @@ final class ZaloMainProcess {
         NativeNotifier.installIPC(on: bridge)
         bridge.handle("__shell__") { args in
             let path = args.string(1) ?? ""
+            let targetURL = URL(fileURLWithPath: path)
             switch args.string(0) {
-            case "showItemInFolder": NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-            default: return NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            case "showItemInFolder":
+                PlatformApp.revealFile(targetURL)
+                return true
+            default:
+                return PlatformApp.openURL(targetURL)
             }
-            return true
         }
         bridge.handle("__child_process__") { _ in
             throw ZaloBridge.BridgeError(message: "EPERM: child_process is not available")

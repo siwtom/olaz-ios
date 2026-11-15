@@ -1,12 +1,16 @@
 import Foundation
+#if os(macOS)
 import AppKit
+import CoreServices
+#elseif canImport(UIKit)
+import UIKit
+#endif
 import ImageIO
 import Network
-import CoreServices
 
-/// `NSImage` is not `Sendable`; images handed out by the loader are immutable after creation.
+/// `PlatformImage` (`NSImage` on macOS) is not `Sendable`; images handed out by the loader are immutable after creation.
 struct SendableImage: @unchecked Sendable {
-    let image: NSImage
+    let image: PlatformImage
 }
 
 /// Loads Zalo CDN media (avatars, photos, stickers, voice, files).
@@ -105,7 +109,11 @@ actor MediaLoader {
             .urls(for: .cachesDirectory, in: .userDomainMask).first!
             .appendingPathComponent("Olaz/media", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        #if os(iOS)
+        urlCache = URLCache(memoryCapacity: 12 << 20, diskCapacity: 250 << 20, directory: directory)
+        #else
         urlCache = URLCache(memoryCapacity: 32 << 20, diskCapacity: 400 << 20, directory: directory)
+        #endif
         let config = URLSessionConfiguration.default
         config.urlCache = nil                       // we manage `urlCache` explicitly (DoH path shares it)
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -129,29 +137,56 @@ actor MediaLoader {
     // MARK: Decoded-image memory cache (synchronous access for views)
 
     private final class CachedImage: @unchecked Sendable {
-        let image: NSImage
-        init(_ image: NSImage) { self.image = image }
+        let image: PlatformImage
+        init(_ image: PlatformImage) { self.image = image }
     }
 
     /// NSCache is thread-safe but not annotated `Sendable`.
     private final class MemoryCache: @unchecked Sendable {
         private let cache: NSCache<NSString, CachedImage> = {
             let cache = NSCache<NSString, CachedImage>()
+            #if os(iOS)
+            cache.countLimit = 220
+            cache.totalCostLimit = 48 << 20
+            #else
             cache.countLimit = 600
             cache.totalCostLimit = 160 << 20
+            #endif
             return cache
         }()
         private let lock = NSLock()
         private var stills: Set<URL> = []       // URLs known to be single-frame (skip animation checks)
+        init() {
+            #if os(iOS)
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didReceiveMemoryWarningNotification,
+                object: nil,
+                queue: nil
+            ) { [weak self] _ in
+                self?.removeAll()
+            }
+            #endif
+        }
         func object(forKey key: NSString) -> CachedImage? { cache.object(forKey: key) }
         func setObject(_ object: CachedImage, forKey key: NSString, cost: Int) {
             cache.setObject(object, forKey: key, cost: cost)
+        }
+        func removeAll() {
+            cache.removeAllObjects()
+            lock.lock()
+            stills.removeAll()
+            lock.unlock()
         }
         func markStill(_ url: URL) { lock.lock(); if stills.count > 5000 { stills.removeAll() }; stills.insert(url); lock.unlock() }
         func isStill(_ url: URL) -> Bool { lock.lock(); defer { lock.unlock() }; return stills.contains(url) }
     }
 
     private static let memory = MemoryCache()
+
+    /// Releases decoded images from memory (used on iOS memory pressure or user cache purge).
+    nonisolated static func purgeMemoryCache() {
+        memory.removeAll()
+    }
 
     static func pixelBucket(_ maxPixelSize: CGFloat) -> Int {
         max(64, Int((maxPixelSize / 32).rounded(.up)) * 32)
@@ -160,11 +195,11 @@ actor MediaLoader {
     private static func imageKey(_ url: URL, _ pixels: Int) -> String { "\(url.absoluteString)#\(pixels)" }
 
     /// Already-decoded image, if any; lets views render without a placeholder flash.
-    nonisolated static func cachedImage(for url: URL, maxPixelSize: CGFloat) -> NSImage? {
+    nonisolated static func cachedImage(for url: URL, maxPixelSize: CGFloat) -> PlatformImage? {
         memory.object(forKey: imageKey(url, pixelBucket(maxPixelSize)) as NSString)?.image
     }
 
-    nonisolated static func cachedAnimatedImage(for url: URL) -> NSImage? {
+    nonisolated static func cachedAnimatedImage(for url: URL) -> PlatformImage? {
         memory.object(forKey: imageKey(url, 0) as NSString)?.image
     }
 
@@ -249,7 +284,8 @@ actor MediaLoader {
                         Self.decode(data, maxPixelSize: pixels)
                     }).value else { throw LoadError.undecodable }
                     if cache {
-                        let cost = Int(decoded.size.width * decoded.size.height) * 4
+                        let px = PlatformImageCodec.pixelSize(of: decoded)
+                        let cost = (px?.width ?? 256) * (px?.height ?? 256) * 4
                         Self.memory.setObject(CachedImage(decoded), forKey: key as NSString, cost: cost)
                     }
                     return SendableImage(image: decoded)
@@ -304,15 +340,51 @@ actor MediaLoader {
         for key in failures.keys where key.hasPrefix(prefix) { failures[key] = nil }
     }
 
-    nonisolated static func decodeAnimated(_ data: Data) -> NSImage? {
+    nonisolated static func decodeAnimated(_ data: Data) -> PlatformImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 1 else { return nil }
+        #if os(macOS)
         return NSImage(data: data)
+        #else
+        let count = CGImageSourceGetCount(source)
+        var frames: [UIImage] = []
+        frames.reserveCapacity(count)
+        var totalDuration: TimeInterval = 0
+        for index in 0..<count {
+            let options = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 512,
+                kCGImageSourceShouldCacheImmediately: true,
+            ] as CFDictionary
+            guard let cg = CGImageSourceCreateThumbnailAtIndex(source, index, options) else { continue }
+            frames.append(UIImage(cgImage: cg))
+            totalDuration += frameDuration(in: source, at: index)
+        }
+        guard !frames.isEmpty else { return nil }
+        return UIImage.animatedImage(with: frames, duration: max(0.2, totalDuration))
+        #endif
     }
+
+    #if os(iOS)
+    private nonisolated static func frameDuration(in source: CGImageSource, at index: Int) -> TimeInterval {
+        let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+        for dictKey in [kCGImagePropertyGIFDictionary, kCGImagePropertyPNGDictionary, kCGImagePropertyWebPDictionary] {
+            guard let dict = props?[dictKey] as? [CFString: Any] else { continue }
+            if let unclamped = dict[kCGImagePropertyGIFUnclampedDelayTime] as? Double, unclamped > 0.01 {
+                return unclamped
+            }
+            if let delay = dict[kCGImagePropertyGIFDelayTime] as? Double, delay > 0.01 {
+                return delay
+            }
+        }
+        return 0.08
+    }
+    #endif
 
     /// Decodes `data`, downsampling so the longest side is at most `maxPixelSize`. A photo stored rotated (EXIF orientation)
     /// is turned upright either way: the full-size path would leave it sideways.
-    nonisolated static func decode(_ data: Data, maxPixelSize: Int) -> NSImage? {
+    nonisolated static func decode(_ data: Data, maxPixelSize: Int) -> PlatformImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions),
               CGImageSourceGetCount(source) > 0 else { return nil }
@@ -337,7 +409,11 @@ actor MediaLoader {
             cgImage = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
         }
         guard let cgImage else { return nil }
+        #if os(macOS)
         return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        #else
+        return UIImage(cgImage: cgImage)
+        #endif
     }
 
     // MARK: Raw data
@@ -1022,6 +1098,7 @@ actor MediaLoader {
 
     /// Marks a downloaded file with `com.apple.quarantine` so Gatekeeper vets it when opened.
     nonisolated static func applyQuarantine(to file: URL, origin: URL) {
+        #if os(macOS)
         var values = URLResourceValues()
         values.quarantineProperties = [
             kLSQuarantineAgentNameKey as String: "Olaz",
@@ -1030,6 +1107,7 @@ actor MediaLoader {
         ]
         var target = file
         try? target.setResourceValues(values)
+        #endif
     }
 
     private nonisolated static func syncToDisk(_ file: URL) {

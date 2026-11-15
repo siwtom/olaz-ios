@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import WebKit
 
@@ -102,3 +103,4 @@ enum EngineProbe {
         app.run()
     }
 }
+#endif

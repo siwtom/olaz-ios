@@ -1,0 +1,85 @@
+name: Build iOS IPA (Olaz)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*-ios"
+
+jobs:
+  build-ipa:
+    name: Build iPhone XS Max IPA (iOS 17.0+ / arm64)
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: FingerprintHelper/go.mod
+          cache-dependency-path: FingerprintHelper/go.sum
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools (XcodeGen, zsign)
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen zsign
+
+      - name: Cache VNG Zalo 26.10.20 DMG
+        uses: actions/cache@v4
+        with:
+          path: build/downloads
+          key: ${{ runner.os }}-zalo-runtime-26.10.20
+
+      - name: Run build helper self-tests
+        run: |
+          python3 scripts/prepare-ios-runtime.py --self-test
+          python3 scripts/prepare-signing-profile.py --self-test
+
+      - name: Build Olaz-iOS-unsigned.ipa (with pre-bundled app.asar)
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          bash scripts/build-ipa.sh
+
+      - name: Optional muacert.com signing via Repository Secrets
+        env:
+          MUACERT_P12_BASE64: ${{ secrets.MUACERT_P12_BASE64 }}
+          MUACERT_PROVISION_BASE64: ${{ secrets.MUACERT_PROVISION_BASE64 }}
+          MUACERT_P12_PASSWORD: ${{ secrets.MUACERT_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${MUACERT_P12_BASE64:-}" || -z "${MUACERT_PROVISION_BASE64:-}" ]]; then
+            echo "No MUACERT_P12_BASE64 / MUACERT_PROVISION_BASE64 secrets configured; keeping unsigned IPA only."
+            exit 0
+          fi
+          python3 - <<'PY'
+          import base64, os, pathlib
+          temp_dir = pathlib.Path(os.environ["RUNNER_TEMP"])
+          p12_b64 = "".join(os.environ["MUACERT_P12_BASE64"].split())
+          prov_b64 = "".join(os.environ["MUACERT_PROVISION_BASE64"].split())
+          (temp_dir / "muacert.p12").write_bytes(base64.b64decode(p12_b64, validate=True))
+          (temp_dir / "muacert.mobileprovision").write_bytes(base64.b64decode(prov_b64, validate=True))
+          PY
+          MUACERT_P12_PATH="$RUNNER_TEMP/muacert.p12" \
+          MUACERT_PROVISION_PATH="$RUNNER_TEMP/muacert.mobileprovision" \
+          MUACERT_P12_PASSWORD="${MUACERT_P12_PASSWORD:-1}" \
+            bash scripts/sign-ipa.sh
+
+      - name: Clean temporary certificate files
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/muacert.p12" "$RUNNER_TEMP/muacert.mobileprovision"
+
+      - name: Upload IPA artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Olaz-iOS-IPA
+          path: dist/*.ipa
+          if-no-files-found: error
+          retention-days: 14

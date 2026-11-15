@@ -1,4 +1,9 @@
+#if os(macOS)
 import AppKit
+#elseif canImport(UIKit)
+import AVFoundation
+import UIKit
+#endif
 import Observation
 import UniformTypeIdentifiers
 @preconcurrency import UserNotifications
@@ -128,7 +133,11 @@ final class NativeNotifier: NSObject, UNUserNotificationCenterDelegate {
     private var focusObservers: [NSObjectProtocol] = []
     private var activityMonitor: Any?
     private var lastActivityPush = Date.distantPast
+    #if os(macOS)
     private var sounds: [NSSound] = []
+    #else
+    private var players: [AVAudioPlayer] = []
+    #endif
     private var attached = false
     private var orphanDrafts = FailedDraftStore()
     private var knownHidden: Set<String> = []
@@ -190,8 +199,13 @@ final class NativeNotifier: NSObject, UNUserNotificationCenterDelegate {
             live[id] = nil
             return
         }
+        #if os(macOS)
+        let windowVisible = mainWindow()?.isVisible == true && mainWindow()?.isMiniaturized == false
+        #else
+        let windowVisible = PlatformApp.isActive
+        #endif
         if NotificationPolicy.shouldSuppress(
-            appIsActive: NSApp.isActive, mainWindowVisible: mainWindow()?.isVisible == true && mainWindow()?.isMiniaturized == false,
+            appIsActive: PlatformApp.isActive, mainWindowVisible: windowVisible,
             openConversation: engine?.openConversationId, tag: request.tag, userIdleSeconds: Self.userIdleSeconds()) {
             notifierLog.info("notification suppressed: conversation is open and the app is in use")
             return
@@ -343,11 +357,12 @@ final class NativeNotifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Re-sends the current focus state (the page-load handler in `ZaloMainProcess` announces "focus" unconditionally).
-    func syncFocusState() { sendFocus(NSApp.isActive) }
+    func syncFocusState() { sendFocus(PlatformApp.isActive) }
 
     // MARK: Focus bridge — the official FocusDetector decides "app is in use" from these events
 
     private func startFocusBridge() {
+        #if os(macOS)
         let names: [(Notification.Name, Bool)] = [(NSApplication.didBecomeActiveNotification, true),
                                                   (NSApplication.didResignActiveNotification, false)]
         focusObservers = names.map { name, active in
@@ -359,7 +374,20 @@ final class NativeNotifier: NSObject, UNUserNotificationCenterDelegate {
             MainActor.assumeIsolated { self?.noteUserActivity() }
             return event
         }
-        sendFocus(NSApp.isActive)
+        #else
+        let names: [(Notification.Name, Bool)] = [(UIApplication.didBecomeActiveNotification, true),
+                                                  (UIApplication.willResignActiveNotification, false)]
+        focusObservers = names.map { name, active in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sendFocus(active) }
+            }
+        }
+        #endif
+        sendFocus(PlatformApp.isActive)
+    }
+
+    func recordUserActivity() {
+        noteUserActivity()
     }
 
     /// `webContents.send('visibility-change', 'focus'|'blur', windowId)` as Electron's main does for the main window.
@@ -380,16 +408,24 @@ final class NativeNotifier: NSObject, UNUserNotificationCenterDelegate {
     func playNotificationSound(_ raw: String) {
         guard let url = URL(string: raw), NotificationPolicy.isSoundURLAllowed(url) else { return }
         Task {
-            guard let file = try? await MediaLoader.shared.localFile(for: url),
-                  let sound = NSSound(contentsOf: file, byReference: true) else { return }
+            guard let file = try? await MediaLoader.shared.localFile(for: url) else { return }
+            #if os(macOS)
+            guard let sound = NSSound(contentsOf: file, byReference: true) else { return }
             sounds.removeAll { !$0.isPlaying }
             sounds.append(sound)
             sound.play()
+            #else
+            guard let player = try? AVAudioPlayer(contentsOf: file) else { return }
+            players.removeAll { !$0.isPlaying }
+            players.append(player)
+            player.play()
+            #endif
         }
     }
 
     // MARK: Helpers
 
+    #if os(macOS)
     /// The app's chat window: not the debug renderer, a panel, or the media viewer (which can be key and main too, but
     /// is not where messages are read, and must not be what "bring Olaz to the front" raises).
     private func mainWindow() -> NSWindow? {
@@ -407,6 +443,11 @@ final class NativeNotifier: NSObject, UNUserNotificationCenterDelegate {
     nonisolated static func userIdleSeconds() -> TimeInterval {
         CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
     }
+    #else
+    func bringAppToFront() {}
+
+    nonisolated static func userIdleSeconds() -> TimeInterval { 0 }
+    #endif
 
     // MARK: UNUserNotificationCenterDelegate
 
@@ -439,7 +480,7 @@ final class NativeNotifier: NSObject, UNUserNotificationCenterDelegate {
                     let draft = ComposerDraft(text: text)
                     if let engine { engine.failedDrafts.stash(draft, for: convId) } else { orphanDrafts.stash(draft, for: convId) }
                     // Say so (no content in the banner) unless the conversation is on screen, where its composer shows it.
-                    if !(NSApp.isActive && engine?.openConversationId == convId) { await postSendFailure(convId: convId) }
+                    if !(PlatformApp.isActive && engine?.openConversationId == convId) { await postSendFailure(convId: convId) }
                 }
             }
         case UNNotificationDefaultActionIdentifier:

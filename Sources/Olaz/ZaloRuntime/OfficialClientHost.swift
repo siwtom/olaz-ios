@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import Network
 import WebKit
 import UniformTypeIdentifiers
@@ -37,7 +41,9 @@ final class OfficialClientHost: NSObject {
         get { stateHandler.sink }
         set { stateHandler.sink = newValue }
     }
+    #if os(macOS)
     private var debugWindow: NSWindow?
+    #endif
     private let pathMonitor = NWPathMonitor()
     private(set) var currentPage: Page?
 
@@ -88,7 +94,11 @@ final class OfficialClientHost: NSObject {
             content.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         }
 
+        #if os(macOS)
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1100, height: 720), configuration: config)
+        #else
+        webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 360, height: 240), configuration: config)
+        #endif
         webView.customUserAgent = ua
         webView.isInspectable = true
         super.init()
@@ -153,6 +163,7 @@ final class OfficialClientHost: NSObject {
     /// then holds disk-backed `File`s for exactly the files the user picked, like a browser's `<input type=file>`.
     /// One pick at a time: the next waits until WebKit took this one's files (or the script ended without asking for them).
     func evaluate(_ script: String, providingFiles urls: [URL]) async -> Any? {
+        #if os(macOS)
         while openPanelBusy { await withCheckedContinuation { openPanelWaiters.append($0) } }
         openPanelBusy = true
         let id = UUID()
@@ -170,6 +181,27 @@ final class OfficialClientHost: NSObject {
         let result = await run.value.value
         finishedPicks.remove(id)
         return result
+        #else
+        while openPanelBusy { await withCheckedContinuation { openPanelWaiters.append($0) } }
+        openPanelBusy = true
+        let (tokens, descriptorJSON) = schemeHandler.stageFiles(urls, scheme: Self.scheme)
+        defer {
+            schemeHandler.unstageFiles(tokens)
+            openPanelBusy = false
+            if !openPanelWaiters.isEmpty { openPanelWaiters.removeFirst().resume() }
+        }
+        let wrapped = """
+        window.__zaloStagedFiles = \(descriptorJSON);
+        try {
+            return await (async () => {
+                \(script)
+            })();
+        } finally {
+            delete window.__zaloStagedFiles;
+        }
+        """
+        return await evaluate(wrapped)
+        #endif
     }
 
     func shutdown() {
@@ -180,6 +212,7 @@ final class OfficialClientHost: NSObject {
         webView.configuration.userContentController.removeAllScriptMessageHandlers()
     }
 
+    #if os(macOS)
     /// Shows the renderer's own DOM in a separate window (development aid only).
     func showDebugWindow() {
         if debugWindow == nil {
@@ -194,9 +227,11 @@ final class OfficialClientHost: NSObject {
         }
         debugWindow?.makeKeyAndOrderFront(nil)
     }
+    #endif
 }
 
 extension OfficialClientHost: WKUIDelegate {
+    #if os(macOS)
     /// The page never shows its own file dialog: only a pick Swift made (`evaluate(_:providingFiles:)`) answers it.
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @MainActor ([URL]?) -> Void) {
@@ -205,6 +240,7 @@ extension OfficialClientHost: WKUIDelegate {
         guard let urls, !urls.isEmpty else { completionHandler(nil); return }
         completionHandler(parameters.allowsMultipleSelection ? urls : Array(urls.prefix(1)))
     }
+    #endif
 }
 
 extension OfficialClientHost: WKNavigationDelegate {
@@ -229,7 +265,7 @@ extension OfficialClientHost: WKNavigationDelegate {
         guard let url = action.request.url else { return .cancel }
         if url.scheme == Self.scheme || url.scheme == "about" || url.scheme == "blob" || url.scheme == "data" { return .allow }
         if action.targetFrame?.isMainFrame == false { return .allow }
-        if ["http", "https"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
+        if ["http", "https"].contains(url.scheme ?? "") { PlatformApp.openURL(url) }
         return .cancel
     }
 
@@ -244,13 +280,43 @@ extension OfficialClientHost: WKNavigationDelegate {
 
 final class AsarSchemeHandler: NSObject, WKURLSchemeHandler {
     static let bridgeSyncPath = "/__olaz/bridge-sync"
+    static let stagedPrefix = "/__olaz/staged/"
     let asar: AsarArchive
     let root: String
     weak var bridge: ZaloBridge?
+    private let stagedLock = NSLock()
+    private var stagedURLs: [String: URL] = [:]
 
     init(asar: AsarArchive, root: String) {
         self.asar = asar
         self.root = root
+    }
+
+    @MainActor
+    func stageFiles(_ urls: [URL], scheme: String) -> (tokens: [String], json: String) {
+        var tokens: [String] = []
+        var items: [[String: String]] = []
+        stagedLock.lock()
+        for url in urls {
+            let token = UUID().uuidString
+            stagedURLs[token] = url
+            tokens.append(token)
+            items.append([
+                "url": "\(scheme)://local\(Self.stagedPrefix)\(token)",
+                "name": url.lastPathComponent,
+                "mime": Self.mime(for: url.lastPathComponent),
+            ])
+        }
+        stagedLock.unlock()
+        let jsonData = (try? JSONSerialization.data(withJSONObject: items)) ?? Data("[]".utf8)
+        return (tokens, String(decoding: jsonData, as: .utf8))
+    }
+
+    @MainActor
+    func unstageFiles(_ tokens: [String]) {
+        stagedLock.lock()
+        for token in tokens { stagedURLs.removeValue(forKey: token) }
+        stagedLock.unlock()
     }
 
     func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
@@ -263,6 +329,19 @@ final class AsarSchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
         let path = url.path()
+        if path.hasPrefix(Self.stagedPrefix) {
+            let token = String(path.dropFirst(Self.stagedPrefix.count))
+            stagedLock.lock()
+            let fileURL = stagedURLs[token]
+            stagedLock.unlock()
+            if let fileURL, let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) {
+                respond(task, url: url, data: data, mime: Self.mime(for: fileURL.lastPathComponent))
+            } else {
+                task.didReceive(HTTPURLResponse(url: url, statusCode: 404, httpVersion: "HTTP/1.1", headerFields: [:])!)
+                task.didFinish()
+            }
+            return
+        }
         let candidates = ["\(root)\(path)", String(path.dropFirst())]
         guard let data = candidates.lazy.compactMap({ self.asar.read($0) }).first else {
             hostLog.error("404 \(path, privacy: .public)")

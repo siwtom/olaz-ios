@@ -357,14 +357,44 @@
       if (!patch()) { const t = setInterval(() => { if (patch()) clearInterval(t); }, 300); setTimeout(() => clearInterval(t), 30000); }
       return true;
     });
-    let last = '';
-    const snapshot = () => {
+      const svgCache = new Map();
+      const rasterizeSVG = (src) => new Promise((resolve) => {
+        if (typeof Image === 'undefined' || typeof document === 'undefined') { resolve(null); return; }
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const w = Math.max(img.naturalWidth || 256, 256);
+            const h = Math.max(img.naturalHeight || 256, 256);
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            const ctx = c.getContext('2d');
+            if (!ctx) { resolve(null); return; }
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, w, h);
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve(c.toDataURL('image/png'));
+          } catch { resolve(null); }
+        };
+        img.onerror = () => resolve(null);
+        img.src = src;
+      });
+      const ensurePngQR = (src) => {
+        if (typeof src !== 'string' || !src.startsWith('data:image/svg')) return src;
+        if (svgCache.has(src)) return svgCache.get(src) || src;
+        svgCache.set(src, '');
+        rasterizeSVG(src).then((png) => {
+          if (png) { svgCache.set(src, png); tick(); }
+        });
+        return src;
+      };
+      let last = '';
+      const snapshot = () => {
       const root = document.querySelector('.login-qr-page') || document.querySelector('#app-page');
       if (!root) return null;
       const imgs = Array.from(root.querySelectorAll('img')).filter((i) => i.src && i.naturalWidth >= 64);
       const qrImg = root.querySelector('.qr-image img, img.qr-image, .login-qr__frame-qr img') || imgs.find((i) => i.src.startsWith('data:image/png') || i.src.startsWith('data:image/svg'));
       const canvas = root.querySelector('.login-qr__frame-qr canvas, .qr-code canvas');
-      let qr = qrImg ? qrImg.src : null;
+      let qr = qrImg ? ensurePngQR(qrImg.src) : null;
       if (!qr && canvas) { try { qr = canvas.toDataURL('image/png'); } catch {} }
       // The official page stops polling after `qr_retry` long-polls (~21 s each, so ~1 min) and marks the QR dead by
       // renaming its <img> to `qr-image--none` (src becomes a placeholder). Older builds used the other classes.

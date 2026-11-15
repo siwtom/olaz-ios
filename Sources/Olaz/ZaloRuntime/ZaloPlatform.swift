@@ -54,15 +54,32 @@ final class ZaloPlatform {
         case "temp":
             return fm.temporaryDirectory.appendingPathComponent("Olaz").path
         case "home":
+            #if os(macOS)
             return fm.homeDirectoryForCurrentUser.path
+            #else
+            return NSHomeDirectory()
+            #endif
         case "downloads":
+            #if os(macOS)
             return fm.urls(for: .downloadsDirectory, in: .userDomainMask)[0].path
+            #else
+            return (fm.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                ?? fm.urls(for: .documentDirectory, in: .userDomainMask)[0]).path
+            #endif
         case "documents":
             return fm.urls(for: .documentDirectory, in: .userDomainMask)[0].path
         case "desktop":
+            #if os(macOS)
             return fm.urls(for: .desktopDirectory, in: .userDomainMask)[0].path
+            #else
+            return fm.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Desktop", isDirectory: true).path
+            #endif
         case "pictures":
+            #if os(macOS)
             return fm.urls(for: .picturesDirectory, in: .userDomainMask)[0].path
+            #else
+            return fm.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Pictures", isDirectory: true).path
+            #endif
         case "logs":
             return userData.appendingPathComponent("logs").path
         default:

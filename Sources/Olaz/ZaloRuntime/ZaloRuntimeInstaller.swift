@@ -1,6 +1,8 @@
 import CryptoKit
 import Foundation
+#if os(macOS)
 import Security
+#endif
 import os
 
 private let runtimeLog = Logger(subsystem: "app.olaz", category: "runtime")
@@ -47,6 +49,10 @@ enum ZaloRuntime {
     static var pending: URL { root.appendingPathComponent("pending", isDirectory: true) }
     /// Downloads, mounts and half-copied folders; emptied at every launch.
     static var work: URL { root.appendingPathComponent("work", isDirectory: true) }
+    /// Pre-packaged read-only runtime embedded inside the app bundle (used on iOS).
+    static var bundled: URL? {
+        Bundle.main.resourceURL?.appendingPathComponent("ZaloRuntime", isDirectory: true)
+    }
 
     static func helper(_ name: String, in runtime: URL) -> URL {
         runtime.appendingPathComponent("Contents/ZaloHelper.app/Contents/MacOS/\(name)")
@@ -54,9 +60,13 @@ enum ZaloRuntime {
 
     static func isComplete(_ runtime: URL) -> Bool {
         let fm = FileManager.default
-        return fm.fileExists(atPath: runtime.appendingPathComponent("Contents/Info.plist").path)
+        let hasCore = fm.fileExists(atPath: runtime.appendingPathComponent("Contents/Info.plist").path)
             && fm.fileExists(atPath: runtime.appendingPathComponent("Contents/Resources/app.asar").path)
-            && fm.isExecutableFile(atPath: helper("ZaloCall", in: runtime).path)
+        #if os(macOS)
+        return hasCore && fm.isExecutableFile(atPath: helper("ZaloCall", in: runtime).path)
+        #else
+        return hasCore
+        #endif
     }
 
     /// `CFBundleShortVersionString` of a Zalo.app or runtime folder.
@@ -125,6 +135,7 @@ struct ZaloRuntimeInstaller: Sendable {
         var errorDescription: String? { message }
     }
 
+    #if os(macOS)
     /// Zalo's Developer ID team (VNG ONLINE CO.,LTD) and Zalo.app's bundle identifier.
     static let requirement = #"anchor apple generic and identifier "com.vng.zalo" and certificate leaf[subject.OU] = "CVB6BX97VM""#
     /// zalo.me only redirects a Mac browser to the Mac installer.
@@ -351,6 +362,7 @@ struct ZaloRuntimeInstaller: Sendable {
             do { try process.run() } catch { continuation.resume(throwing: error) }
         }
     }
+    #endif
 }
 
 /// Reports the redirect instead of following it.
