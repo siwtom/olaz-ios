@@ -209,11 +209,15 @@ final class SQLiteHost: @unchecked Sendable {
 
     /// `run`: `{lastID, changes}`; a failed UNIQUE constraint still resolves (official behaviour).
     func run(_ fullname: String, _ statement: Statement) async throws -> [String: Any] {
+        try await runBoxed(fullname, statement).value
+    }
+
+    fileprivate func runBoxed(_ fullname: String, _ statement: Statement) async throws -> Unchecked<[String: Any]> {
         let connection = try connection(fullname)
         return try await onQueue(connection) { c in
             do { try Self.execute(c.db, statement) } catch let error as SQLiteError where error.isUniqueConstraint {}
             return Unchecked(value: ["lastID": sqlite3_last_insert_rowid(c.db), "changes": Int64(sqlite3_changes(c.db))] as [String: Any])
-        }.value
+        }
     }
 
     /// `runs`: one prepared statement bound with every row of `rows`, in a transaction.
@@ -267,18 +271,30 @@ final class SQLiteHost: @unchecked Sendable {
     }
 
     func all(_ fullname: String, _ statement: Statement) async throws -> [[String: Any]] {
+        try await allBoxed(fullname, statement).value
+    }
+
+    fileprivate func allBoxed(_ fullname: String, _ statement: Statement) async throws -> Unchecked<[[String: Any]]> {
         let connection = try connection(fullname)
-        return try await onQueue(connection) { c in Unchecked(value: try Self.rows(c.db, statement)) }.value
+        return try await onQueue(connection) { c in Unchecked(value: try Self.rows(c.db, statement)) }
     }
 
     func get(_ fullname: String, _ statement: Statement) async throws -> [String: Any]? {
+        try await getBoxed(fullname, statement).value
+    }
+
+    fileprivate func getBoxed(_ fullname: String, _ statement: Statement) async throws -> Unchecked<[String: Any]?> {
         let connection = try connection(fullname)
-        return try await onQueue(connection) { c in Unchecked(value: try Self.rows(c.db, statement, limit: 1).first) }.value
+        return try await onQueue(connection) { c in Unchecked(value: try Self.rows(c.db, statement, limit: 1).first) }
     }
 
     /// `optimized-all`: every query bound with each of its parameter rows; all rows concatenated.
     /// Params arrive `Unchecked`-boxed (same reason as `runs`).
     func optimizedAll(_ fullname: String, queries: [String], params: Unchecked<[[[Any]]]>) async throws -> [[String: Any]] {
+        try await optimizedAllBoxed(fullname, queries: queries, params: params).value
+    }
+
+    fileprivate func optimizedAllBoxed(_ fullname: String, queries: [String], params: Unchecked<[[[Any]]]>) async throws -> Unchecked<[[String: Any]]> {
         let connection = try connection(fullname)
         let boxed = params
         return try await onQueue(connection) { c in
@@ -295,7 +311,7 @@ final class SQLiteHost: @unchecked Sendable {
                 }
             }
             return Unchecked(value: out)
-        }.value
+        }
     }
 
     // MARK: SQLite plumbing (always on the connection's queue)
@@ -472,25 +488,25 @@ extension SQLiteHost {
             if let name = args.string(0) { migrated(name) }
             return nil
         }
-        bridge.async("$znode.sqliteHost.exec") { [self] args -> Any? in
+        bridge.async("$znode.sqliteHost.exec") { @MainActor [self] args -> Any? in
             guard let name = args.string(0), let method = args.string(1) else { throw ZaloBridge.BridgeError(message: "exec: bad arguments") }
             let statement = args.dict(2) ?? [:]
             switch method {
             case "run":
-                return try await run(name, Self.statement(statement))
+                return try await runBoxed(name, Self.statement(statement)).value
             case "runs":
                 try await runs(name, query: Self.query(statement["query"]), rows: Unchecked(value: Self.rows(statement["params"])))
                 return nil
             case "all":
-                return try await all(name, Self.statement(statement))
+                return try await allBoxed(name, Self.statement(statement)).value
             case "get":
-                return try await get(name, Self.statement(statement))
+                return try await getBoxed(name, Self.statement(statement)).value
             case "optimized-all":
                 let rawQueries: [Any] = statement["queries"] as? [Any] ?? []
                 let rawParams: [Any] = statement["params"] as? [Any] ?? []
                 let queries: [String] = rawQueries.map { Self.query($0) }
                 let params: [[[Any]]] = rawParams.map { Self.rows($0) }
-                return try await optimizedAll(name, queries: queries, params: Unchecked(value: params))
+                return try await optimizedAllBoxed(name, queries: queries, params: Unchecked(value: params)).value
             case "serialize":
                 let items = (statement["data"] as? [[String: Any]] ?? []).map { item -> SerializedItem in
                     if item["method"] as? String == "runs" { return .runs(query: Self.query(item["query"]), rows: Self.rows(item["params"])) }

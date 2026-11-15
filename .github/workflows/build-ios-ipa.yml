@@ -30,12 +30,12 @@ jobs:
         run: |
           HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen zsign
 
-      - name: Cache VNG Zalo 26.10.20 DMG
-        uses: actions/cache@v4
+      - name: Restore VNG Zalo 26.10.20 DMG cache
+        id: dmg-cache
+        uses: actions/cache/restore@v4
         with:
           path: build/downloads
           key: ${{ runner.os }}-zalo-runtime-26.10.20
-          save-always: true
 
       - name: Run build helper self-tests
         run: |
@@ -76,6 +76,13 @@ jobs:
         if: always()
         run: |
           rm -f "$RUNNER_TEMP/muacert.p12" "$RUNNER_TEMP/muacert.mobileprovision"
+
+      - name: Save VNG Zalo 26.10.20 DMG cache
+        if: always() && steps.dmg-cache.outputs.cache-hit != 'true' && hashFiles('build/downloads/*.dmg') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: build/downloads
+          key: ${{ runner.os }}-zalo-runtime-26.10.20
 
       - name: Upload IPA artifacts
         uses: actions/upload-artifact@v4
