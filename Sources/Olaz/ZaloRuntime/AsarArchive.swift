@@ -117,8 +117,13 @@ enum OfficialZaloInstall {
     }
 
     static func locate(appURL: URL = defaultAppURL) throws -> Info {
-        let asarURL = appURL.appendingPathComponent("Contents/Resources/app.asar")
+        let fm = FileManager.default
+        let flatAsar = appURL.appendingPathComponent("app.asar")
+        let asarURL = fm.fileExists(atPath: flatAsar.path)
+            ? flatAsar
+            : appURL.appendingPathComponent("Contents/Resources/app.asar")
         let plist = NSDictionary(contentsOf: appURL.appendingPathComponent("Contents/Info.plist"))
+            ?? NSDictionary(contentsOf: appURL.appendingPathComponent("runtime-info.plist"))
         let version = plist?["CFBundleShortVersionString"] as? String ?? "?"
         let asar = try AsarArchive(url: asarURL)
         let clientVersion = asar.read("main-dist/main.js").flatMap(Self.clientVersion(fromMainJS:))

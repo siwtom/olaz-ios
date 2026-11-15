@@ -28,11 +28,14 @@ enum ResourceLocator {
         if let beside = resources(ofBundleAt: Bundle.main.bundleURL.appendingPathComponent(resourceBundleName)) {
             candidates.append(beside)
         }
+        let names = subdirectory == "Resources" ? ["Resources", "AppResources"] : [subdirectory]
         for base in candidates {
-            let url = base.appendingPathComponent(subdirectory, isDirectory: true)
-            var isDir: ObjCBool = false
-            if fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                return url
+            for name in names {
+                let url = base.appendingPathComponent(name, isDirectory: true)
+                var isDir: ObjCBool = false
+                if fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                    return url
+                }
             }
         }
         #if SWIFT_PACKAGE

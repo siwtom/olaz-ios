@@ -17,13 +17,16 @@ echo "==> 2/6 Building Go FingerprintHelper C-archive (ios/arm64)"
 bash scripts/build-fingerprint-helper-ios.sh
 
 echo "==> 3/6 Preparing pre-bundled ZaloRuntime (app.asar 26.10.20)"
-if [[ "${FORCE_RUNTIME_REFRESH:-0}" == "1" || ! -f "$RUNTIME_DIR/Contents/Resources/app.asar" ]]; then
+if [[ "${FORCE_RUNTIME_REFRESH:-0}" == "1" || ! -f "$RUNTIME_DIR/app.asar" ]]; then
   python3 scripts/prepare-ios-runtime.py --out "$RUNTIME_DIR"
 else
   echo "Reusing existing $RUNTIME_DIR"
 fi
 
-echo "==> 4/6 Generating Xcode project via XcodeGen"
+echo "==> 4/6 Staging AppResources & generating Xcode project via XcodeGen"
+rm -rf "$ROOT_DIR/build/AppResources"
+mkdir -p "$ROOT_DIR/build"
+cp -R "$ROOT_DIR/Sources/Olaz/Resources" "$ROOT_DIR/build/AppResources"
 xcodegen generate --spec "$ROOT_DIR/project.yml"
 
 echo "==> 5/6 Building Olaz.app (Release, iphoneos/arm64, unsigned)"
@@ -45,8 +48,16 @@ if [[ ! -d "$APP_PATH" ]]; then
   echo "ERROR: Built Olaz.app not found at $APP_PATH" >&2
   exit 1
 fi
-if [[ ! -f "$APP_PATH/ZaloRuntime/Contents/Resources/app.asar" ]]; then
-  echo "ERROR: Pre-bundled ZaloRuntime/Contents/Resources/app.asar missing from Olaz.app!" >&2
+if [[ ! -f "$APP_PATH/ZaloRuntime/app.asar" ]]; then
+  echo "ERROR: Pre-bundled ZaloRuntime/app.asar missing from Olaz.app!" >&2
+  exit 1
+fi
+if [[ ! -f "$APP_PATH/AppResources/bridge-table.json" ]]; then
+  echo "ERROR: AppResources/bridge-table.json missing from Olaz.app!" >&2
+  exit 1
+fi
+if [[ -d "$APP_PATH/Resources" ]]; then
+  echo "ERROR: Unexpected root Resources/ folder inside iOS Olaz.app!" >&2
   exit 1
 fi
 
@@ -55,11 +66,14 @@ rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR/Payload" "$DIST_DIR"
 cp -R "$APP_PATH" "$STAGE_DIR/Payload/Olaz.app"
 xattr -cr "$STAGE_DIR/Payload/Olaz.app" 2>/dev/null || true
+find "$STAGE_DIR/Payload/Olaz.app" -type f ! -name "Olaz" -exec chmod 644 {} +
+chmod 755 "$STAGE_DIR/Payload/Olaz.app/Olaz"
 
 codesign --force --sign - \
   --entitlements "$ROOT_DIR/scripts/OlazIOS.entitlements" \
   --timestamp=none \
   "$STAGE_DIR/Payload/Olaz.app"
+codesign --verify --deep --strict --verbose=2 "$STAGE_DIR/Payload/Olaz.app"
 
 rm -f "$UNSIGNED_IPA"
 (

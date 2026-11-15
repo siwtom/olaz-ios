@@ -167,7 +167,7 @@ final class ZaloEngine {
             #else
             phase = .preparing(RuntimeSetup(
                 step: .looking,
-                failure: "Thiếu dữ liệu ZaloRuntime/Contents/Resources/app.asar trong gói cài đặt iOS."
+                failure: "Thiếu dữ liệu ZaloRuntime/app.asar trong gói cài đặt iOS."
             ))
             #endif
             return
@@ -252,7 +252,7 @@ final class ZaloEngine {
         #else
         phase = .preparing(RuntimeSetup(
             step: .looking,
-            failure: "Thiếu dữ liệu ZaloRuntime/Contents/Resources/app.asar trong gói cài đặt iOS."
+            failure: "Thiếu dữ liệu ZaloRuntime/app.asar trong gói cài đặt iOS."
         ))
         #endif
     }

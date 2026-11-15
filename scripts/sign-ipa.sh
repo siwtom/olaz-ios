@@ -85,4 +85,8 @@ if [[ -n "${EXPECT_UDID:-}" ]]; then
 fi
 
 python3 "$ROOT_DIR/scripts/prepare-signing-profile.py" "${VERIFY_ARGS[@]}"
+if [[ "$(uname -s)" == "Darwin" ]] && command -v codesign >/dev/null 2>&1; then
+  ditto -x -k "$SIGNED_IPA" "$SIGN_WORK_DIR/verify_signed"
+  codesign --verify --deep --strict --verbose=2 "$SIGN_WORK_DIR/verify_signed/Payload/Olaz.app"
+fi
 ls -lh "$SIGNED_IPA"

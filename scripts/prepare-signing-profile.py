@@ -256,7 +256,20 @@ def verify_ipa(
         info_name = "Payload/Olaz.app/Info.plist"
         prov_name = "Payload/Olaz.app/embedded.mobileprovision"
         codesig_name = "Payload/Olaz.app/_CodeSignature/CodeResources"
-        asar_name = "Payload/Olaz.app/ZaloRuntime/Contents/Resources/app.asar"
+        if any(n.startswith("Payload/Olaz.app/Resources/") for n in names):
+            raise ValueError(
+                "IPA contains Payload/Olaz.app/Resources/, which breaks iOS flat CFBundle structure; use AppResources/"
+            )
+        asar_candidates = (
+            "Payload/Olaz.app/ZaloRuntime/app.asar",
+            "Payload/Olaz.app/ZaloRuntime/Contents/Resources/app.asar",
+        )
+        asar_name = next((c for c in asar_candidates if c in names), None)
+        if not asar_name:
+            raise ValueError(f"IPA missing required app.asar (checked {asar_candidates})")
+        if asar_name == "Payload/Olaz.app/ZaloRuntime/app.asar":
+            if "Payload/Olaz.app/AppResources/bridge-table.json" not in names:
+                raise ValueError("IPA missing required entry: Payload/Olaz.app/AppResources/bridge-table.json")
 
         for required in (info_name, prov_name, codesig_name, asar_name):
             if required not in names:
@@ -368,7 +381,8 @@ def run_self_test() -> None:
             zf.writestr("Payload/Olaz.app/Info.plist", info_bytes)
             zf.writestr("Payload/Olaz.app/embedded.mobileprovision", _wrap_profile_bytes(explicit))
             zf.writestr("Payload/Olaz.app/_CodeSignature/CodeResources", b"<plist/>")
-            zf.writestr("Payload/Olaz.app/ZaloRuntime/Contents/Resources/app.asar", b"ASAR_TEST")
+            zf.writestr("Payload/Olaz.app/ZaloRuntime/app.asar", b"ASAR_TEST")
+            zf.writestr("Payload/Olaz.app/AppResources/bridge-table.json", b"{}")
 
         summary = verify_ipa(
             ipa_path,

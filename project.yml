@@ -24,7 +24,7 @@ targets:
       - path: Sources/Olaz/JSModules
         type: folder
         buildPhase: resources
-      - path: Sources/Olaz/Resources
+      - path: build/AppResources
         type: folder
         buildPhase: resources
       - path: build/ZaloRuntime

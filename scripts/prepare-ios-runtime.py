@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 Download, verify, strip macOS native modules/unpacked binaries from Zalo's app.asar,
-and package a self-contained iOS runtime folder at:
-  build/ZaloRuntime/Contents/Info.plist
-  build/ZaloRuntime/Contents/Resources/app.asar
+and package a flat self-contained iOS runtime folder at:
+  build/ZaloRuntime/runtime-info.plist
+  build/ZaloRuntime/app.asar
 
-Matches Sources/Olaz/ZaloRuntime/AsarArchive.swift and ZaloRuntimeInstaller.swift.
+Avoids nested Contents/Info.plist so iOS codesign never treats ZaloRuntime as an
+unsigned sub-bundle. Matches AsarArchive.swift and ZaloRuntimeInstaller.swift.
 """
 
 from __future__ import annotations
@@ -173,26 +174,21 @@ def package_from_app(app_path: pathlib.Path, out_dir: pathlib.Path, check_signat
     tmp_out = out_dir.with_name(out_dir.name + ".staging")
     if tmp_out.exists():
         shutil.rmtree(tmp_out)
-    contents_dir = tmp_out / "Contents"
-    resources_dir = contents_dir / "Resources"
-    resources_dir.mkdir(parents=True, exist_ok=True)
+    tmp_out.mkdir(parents=True, exist_ok=True)
 
-    kept, stripped = strip_asar(src_asar, resources_dir / "app.asar")
+    kept, stripped = strip_asar(src_asar, tmp_out / "app.asar")
     runtime_plist = {
-        "CFBundleIdentifier": "com.vng.zalo.runtime",
-        "CFBundleName": "ZaloRuntime",
         "CFBundleShortVersionString": version,
         "CFBundleVersion": bundle_version,
-        "CFBundlePackageType": "BNDL",
     }
-    with (contents_dir / "Info.plist").open("wb") as f:
+    with (tmp_out / "runtime-info.plist").open("wb") as f:
         plistlib.dump(runtime_plist, f, sort_keys=True)
 
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     tmp_out.rename(out_dir)
-    size_mb = (out_dir / "Contents" / "Resources" / "app.asar").stat().st_size / (1024 * 1024)
+    size_mb = (out_dir / "app.asar").stat().st_size / (1024 * 1024)
     print(f"Prepared {out_dir} (Zalo {version}, kept {kept} entries, stripped {stripped}, app.asar {size_mb:.2f} MiB)")
 
 
@@ -263,7 +259,8 @@ def run_self_test() -> int:
         out_runtime = root / "ZaloRuntime"
         package_from_app(fake_app, out_runtime, check_signature=False)
 
-        out_asar = out_runtime / "Contents" / "Resources" / "app.asar"
+        out_asar = out_runtime / "app.asar"
+        assert not (out_runtime / "Contents").exists(), "Nested Contents/ must not exist on iOS"
         parsed_header, out_raw, base = read_asar(out_asar)
 
         # Verify exact Swift AsarArchive math: base == 8 + u32(at: 4), json at 16..<16+u32(at: 12)
@@ -296,7 +293,7 @@ def run_self_test() -> int:
             end = start + int(meta["size"])
             assert out_raw[start:end] == fixtures[keep], f"Mismatch for {keep}"
 
-        with (out_runtime / "Contents" / "Info.plist").open("rb") as f:
+        with (out_runtime / "runtime-info.plist").open("rb") as f:
             rt_plist = plistlib.load(f)
         assert rt_plist["CFBundleShortVersionString"] == PINNED_VERSION
 

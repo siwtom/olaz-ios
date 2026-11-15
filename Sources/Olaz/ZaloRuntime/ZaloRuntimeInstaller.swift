@@ -60,18 +60,22 @@ enum ZaloRuntime {
 
     static func isComplete(_ runtime: URL) -> Bool {
         let fm = FileManager.default
-        let hasCore = fm.fileExists(atPath: runtime.appendingPathComponent("Contents/Info.plist").path)
+        let hasMacLayout = fm.fileExists(atPath: runtime.appendingPathComponent("Contents/Info.plist").path)
             && fm.fileExists(atPath: runtime.appendingPathComponent("Contents/Resources/app.asar").path)
         #if os(macOS)
-        return hasCore && fm.isExecutableFile(atPath: helper("ZaloCall", in: runtime).path)
+        return hasMacLayout && fm.isExecutableFile(atPath: helper("ZaloCall", in: runtime).path)
         #else
-        return hasCore
+        let hasFlatLayout = fm.fileExists(atPath: runtime.appendingPathComponent("runtime-info.plist").path)
+            && fm.fileExists(atPath: runtime.appendingPathComponent("app.asar").path)
+        return hasMacLayout || hasFlatLayout
         #endif
     }
 
     /// `CFBundleShortVersionString` of a Zalo.app or runtime folder.
     static func version(of bundle: URL) -> String? {
-        NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist"))?["CFBundleShortVersionString"] as? String
+        let plist = NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist"))
+            ?? NSDictionary(contentsOf: bundle.appendingPathComponent("runtime-info.plist"))
+        return plist?["CFBundleShortVersionString"] as? String
     }
 
     /// At launch, before anything reads the runtime: drops leftovers of interrupted installs and swaps in a prepared upgrade.

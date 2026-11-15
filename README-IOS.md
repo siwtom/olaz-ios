@@ -4,7 +4,7 @@ Bản port iOS của **Olaz (`zalo-swift-re`)** chạy trực tiếp engine JS c
 
 ## Điểm nổi bật
 
-- **Nạp sẵn `app.asar` (`ZaloSetup-universal-26.10.20.dmg`)**: Pipeline tự tải từ CDN chính thức VNG, kiểm tra `SHA-256` & chữ ký `CVB6BX97VM`, loại bỏ module macOS (`.node`, `.dylib`, `.so`, `unpacked`), đóng gói sẵn `Olaz.app/ZaloRuntime/Contents/Resources/app.asar` và map bằng `.alwaysMapped` để tiết kiệm RAM. Mở app là có ngay mã QR đăng nhập, không cần tải 100+ MB lúc chạy.
+- **Nạp sẵn `app.asar` (`ZaloSetup-universal-26.10.20.dmg`)**: Pipeline tự tải từ CDN chính thức VNG, kiểm tra `SHA-256` & chữ ký `CVB6BX97VM`, loại bỏ module macOS (`.node`, `.dylib`, `.so`, `unpacked`), đóng gói sẵn `Olaz.app/ZaloRuntime/app.asar` và map bằng `.alwaysMapped` để tiết kiệm RAM. Mở app là có ngay mã QR đăng nhập, không cần tải 100+ MB lúc chạy.
 - **Tối ưu RAM cho A12 / 4 GB**:
   - Giảm cache `URLCache` (12 MB RAM / 250 MB disk) và `NSCache` (48 MB), tự dọn cache khi nhận memory warning hoặc khi vào nền (`scenePhase == .background`).
   - `SharedWorker` khởi chạy **theo nhu cầu** (khi mở tab **zCloud** hoặc bật trong **Cài đặt → Hiệu năng & Engine**), không chiếm RAM thường trực khi chỉ nhắn tin.
